@@ -18,6 +18,7 @@ package io.gravitee.am.jwt;
 import com.nimbusds.jose.JOSEException;
 import com.nimbusds.jose.JWSAlgorithm;
 import com.nimbusds.jose.JWSVerifier;
+import com.nimbusds.jose.crypto.ECDSAVerifier;
 import com.nimbusds.jose.crypto.MACVerifier;
 import com.nimbusds.jose.crypto.RSASSAVerifier;
 import com.nimbusds.jose.crypto.bc.BouncyCastleProviderSingleton;
@@ -34,6 +35,8 @@ import org.slf4j.LoggerFactory;
 import javax.crypto.SecretKey;
 import java.security.InvalidKeyException;
 import java.security.Key;
+import java.security.PublicKey;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
 import java.text.ParseException;
 import java.time.Instant;
@@ -47,12 +50,13 @@ import java.util.stream.Collectors;
 public class DefaultJWTParser implements JWTParser {
 
     private static final Logger logger = LoggerFactory.getLogger(DefaultJWTParser.class);
+    public static final String NO_MATCHING_JWT_PARSER_FOR_KEY = "No matching JWT parser for key : ";
     private final JWSVerifier verifier;
     private long allowedClockSkewMillis = 0;
 
     public DefaultJWTParser(final Key key) throws InvalidKeyException {
-        if (key instanceof RSAPublicKey) {
-            this.verifier = new RSASSAVerifier((RSAPublicKey) key);
+        if (key instanceof PublicKey) {
+            verifier = getVerifier((PublicKey) key);
             // if JCA doesn't support at least the PS256 algorithm (jdk <= 8)
             // add BouncyCastle JCA provider
             if (!JCASupport.isSupported(JWSAlgorithm.PS256)) {
@@ -65,8 +69,24 @@ public class DefaultJWTParser implements JWTParser {
                 throw new InvalidKeyException(e);
             }
         } else {
-            throw new InvalidKeyException("No matching JWT parser for key : " + key);
+            throw new InvalidKeyException(NO_MATCHING_JWT_PARSER_FOR_KEY + key);
         }
+    }
+
+    private JWSVerifier getVerifier(PublicKey key) throws InvalidKeyException {
+        JWSVerifier verifier;
+        if (key instanceof RSAPublicKey){
+            verifier = new RSASSAVerifier((RSAPublicKey) key);
+        } else if (key instanceof ECPublicKey) {
+            try {
+                verifier = new ECDSAVerifier((ECPublicKey) key);
+            } catch (JOSEException e) {
+                throw new InvalidKeyException(e);
+            }
+        } else {
+            throw new InvalidKeyException(NO_MATCHING_JWT_PARSER_FOR_KEY + key);
+        }
+        return verifier;
     }
 
     @Override
