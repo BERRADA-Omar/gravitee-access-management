@@ -29,14 +29,20 @@ import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
+import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
+import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -47,6 +53,8 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public abstract class AbstractCertificateProvider implements CertificateProvider {
+    public static final String RSA = "RSA";
+    public static final String EC = "EC";
     @Autowired
     protected CertificateMetadata certificateMetadata;
     private Date expirationDate;
@@ -88,12 +96,16 @@ public abstract class AbstractCertificateProvider implements CertificateProvider
                     certificateKeys.add(new CertificateKey(CertificateFormat.PEM, pem));
                     expirationDate = ((X509Certificate) cert).getNotAfter();
                 }
-                certificateKeys.add(new CertificateKey(CertificateFormat.SSH_RSA, RSAKeyUtils.toSSHRSAString((RSAPublicKey) keyPair.getPublic())));
+                PublicKey publicKey = keyPair.getPublic();
+                if (publicKey.getAlgorithm().equals(RSA)){
+                    certificateKeys.add(new CertificateKey(CertificateFormat.SSH_RSA, RSAKeyUtils.toSSHRSAString((RSAPublicKey) publicKey)));
+                } else if (publicKey.getAlgorithm().equals(EC)){
+                    certificateKeys.add(new CertificateKey("ECSDA", toEcdsaString((ECPublicKey) publicKey)));
+                }
             } else {
-                throw new IllegalArgumentException("A RSA Signer must be supplied");
+                throw new IllegalArgumentException("An ECSDA or RSA Signer must be supplied");
             }
         }
-
     }
 
     protected abstract String getStorepass();
@@ -168,6 +180,12 @@ public abstract class AbstractCertificateProvider implements CertificateProvider
         return signature.getValue();
     }
 
+    private String toEcdsaString(ECPublicKey publicKey) throws NoSuchAlgorithmException, InvalidKeySpecException {
+        KeyFactory keyFactory = KeyFactory.getInstance(EC);
+        X509EncodedKeySpec keySpec = keyFactory.getKeySpec(publicKey, X509EncodedKeySpec.class);
+        return new String(java.util.Base64.getEncoder().encode(keySpec.getEncoded()));
+    }
+
     private Set<JWK> getKeys() {
         return jwkSet.toPublicJWKSet().getKeys().stream().flatMap(nimbusJwk -> convert(nimbusJwk, false)).collect(Collectors.toSet());
     }
@@ -180,7 +198,7 @@ public abstract class AbstractCertificateProvider implements CertificateProvider
     private JWK createKey(com.nimbusds.jose.jwk.JWK nimbusJwk, boolean includePrivate, String use) {
         String keyType = nimbusJwk.getKeyType().toString();
         JWK jwk;
-        if (keyType.equals("RSA")) {
+        if (keyType.equals(RSA)) {
             jwk = new RSAKey();
         }
         else {
@@ -218,7 +236,7 @@ public abstract class AbstractCertificateProvider implements CertificateProvider
             jwk.setX5tS256(nimbusJwk.getX509CertSHA256Thumbprint().toString());
         }
 
-        if (keyType.equals("RSA")) {
+        if (keyType.equals(RSA)) {
             createRsaJwk((com.nimbusds.jose.jwk.RSAKey) nimbusJwk, includePrivate, (RSAKey) jwk);
         }
         else {
