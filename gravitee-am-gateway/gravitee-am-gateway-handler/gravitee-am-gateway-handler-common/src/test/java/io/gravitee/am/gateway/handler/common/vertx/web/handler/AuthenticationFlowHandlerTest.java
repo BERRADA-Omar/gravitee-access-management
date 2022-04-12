@@ -139,6 +139,33 @@ public class AuthenticationFlowHandlerTest extends RxWebTestBase {
     }
 
     @Test
+    public void shouldRedirectToMFAEnrollmentPage_adaptiveMFA_no_enroll() throws Exception {
+        router.route().order(-1).handler(rc -> {
+            // set client
+            Client client = new Client();
+            client.setFactors(Collections.singleton("factor-1"));
+            rc.put(ConstantKeys.CLIENT_CONTEXT_KEY, client);
+            MFASettings mfaSettings = new MFASettings();
+            mfaSettings.setAdaptiveAuthenticationRule("{context.attributes['geoip']['country_iso_code'] == 'FR'");
+            rc.put(ConstantKeys.GEOIP_KEY, new JsonObject().put("country_iso_code", "FR").getMap());
+            // set user
+            io.gravitee.am.model.User endUser = new io.gravitee.am.model.User();
+            rc.getDelegate().setUser(new User(endUser));
+            rc.next();
+        });
+
+        testRequest(
+                HttpMethod.GET, "/login",
+                null,
+                resp -> {
+                    String location = resp.headers().get("location");
+                    assertNotNull(location);
+                    assertTrue(location.endsWith("/mfa/enroll"));
+                },
+                HttpStatusCode.FOUND_302, "Found", null);
+    }
+
+    @Test
     public void shouldRedirectToMFAEnrollmentPage_device_unknown() throws Exception {
         router.route().order(-1).handler(rc -> {
             // set client
